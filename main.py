@@ -13,7 +13,7 @@ import torch.optim as optim
 from sklearn import metrics
 from torch.autograd import Variable
 from torch.optim.lr_scheduler import MultiStepLR
-from torch.utils.data import DataLoader  # Added this import
+from torch.utils.data import DataLoader
 
 from cgcnn.data import CIFData
 from cgcnn.data import collate_pool
@@ -92,11 +92,12 @@ else:
 def main():
     global args, best_mae_error
 
-    # --- CUSTOM MODIFICATION ---
-    # Manually loading explicit directories instead of automatic splitting
-    print("Loading explicit train_data and val_data folders...")
-    train_dataset = CIFData('train_data')
-    val_dataset = CIFData('val_data')
+   
+
+    base_dir = args.data_options[0]  
+    print(f"Loading explicit train_data and val_data folders from {base_dir}...")
+    train_dataset = CIFData(os.path.join(base_dir, 'train_data'))
+    val_dataset = CIFData(os.path.join(base_dir, 'val_data'))
     collate_fn = collate_pool
 
     train_loader = DataLoader(
@@ -303,6 +304,13 @@ def validate(val_loader, model, criterion, normalizer, test=False):
     losses = AverageMeter()
     if args.task == 'regression':
         mae_errors = AverageMeter()
+        
+        # --- CUSTOM MODIFICATION FOR R2 ---
+        # Initialize lists to hold epoch-wide predictions and targets
+        epoch_targets = []
+        epoch_preds = []
+        # ----------------------------------
+        
     else:
         accuracies = AverageMeter()
         precisions = AverageMeter()
@@ -351,6 +359,14 @@ def validate(val_loader, model, criterion, normalizer, test=False):
             mae_error = mae(normalizer.denorm(output.data.cpu()), target)
             losses.update(loss.data.cpu().item(), target.size(0))
             mae_errors.update(mae_error, target.size(0))
+            
+            # --- CUSTOM MODIFICATION FOR R2 ---
+            # Append predictions and targets for the current batch
+            batch_pred = normalizer.denorm(output.data.cpu())
+            epoch_preds += batch_pred.view(-1).tolist()
+            epoch_targets += target.view(-1).tolist()
+            # ----------------------------------
+            
             if test:
                 test_pred = normalizer.denorm(output.data.cpu())
                 test_target = target
@@ -409,9 +425,15 @@ def validate(val_loader, model, criterion, normalizer, test=False):
                 writer.writerow((cif_id, target, pred))
     else:
         star_label = '*'
+        
     if args.task == 'regression':
-        print(' {star} MAE {mae_errors.avg:.3f}'.format(star=star_label,
-                                                        mae_errors=mae_errors))
+        # --- CUSTOM MODIFICATION FOR R2 ---
+        # Calculate the overall R-squared for the validation epoch and print it
+        r2 = metrics.r2_score(epoch_targets, epoch_preds)
+        print(' {star} MAE {mae_errors.avg:.4f} R2 {r2:.4f}'.format(star=star_label,
+                                                                    mae_errors=mae_errors,
+                                                                    r2=r2))
+        # ----------------------------------
         return mae_errors.avg
     else:
         print(' {star} AUC {auc.avg:.3f}'.format(star=star_label,
